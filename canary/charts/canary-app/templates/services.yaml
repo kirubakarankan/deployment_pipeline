@@ -1,0 +1,21 @@
+{{- /*
+  <name>         selects all pods: real traffic is split by the stable/canary pod ratio
+  <name>-stable  Argo Rollouts pins this to the stable ReplicaSet
+  <name>-canary  Argo Rollouts pins this to the canary ReplicaSet
+*/ -}}
+{{- range $suffix := list "" "-stable" "-canary" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "canary-app.name" $ }}{{ $suffix }}
+  labels:
+    {{- include "canary-app.labels" $ | nindent 4 }}
+spec:
+  selector:
+    {{- include "canary-app.selector" $ | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- end }}

@@ -1,0 +1,63 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ include "canary-app.name" . }}
+  labels:
+    {{- include "canary-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "canary-app.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "canary-app.selector" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+    spec:
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: APP_VERSION
+              value: {{ .Values.app.version | quote }}
+            - name: FAULT_ERROR_RATE
+              value: {{ .Values.fault.errorRate | quote }}
+            - name: FAULT_LATENCY_MS
+              value: {{ .Values.fault.latencyMs | quote }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+  strategy:
+    canary:
+      canaryService: {{ include "canary-app.name" . }}-canary
+      stableService: {{ include "canary-app.name" . }}-stable
+      # Background analysis runs for the whole rollout; one failed
+      # measurement aborts it and scales the canary back to zero.
+      analysis:
+        startingStep: 1
+        templates:
+          - templateName: {{ include "canary-app.name" . }}-health
+        args:
+          - name: pod-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+      steps:
+        {{- toYaml .Values.canary.steps | nindent 8 }}

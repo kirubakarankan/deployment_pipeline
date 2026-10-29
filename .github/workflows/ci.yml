@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  canary-app:
+    name: Canary app tests
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: canary/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: canary/app/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: pytest -q
+
+  canary-chart:
+    name: Canary Helm chart
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint canary/charts/canary-app
+      - run: helm template canary-app canary/charts/canary-app > /dev/null
+
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false
+      - run: terraform validate
+
+  image:
+    name: Build & push canary image
+    needs: [canary-app, canary-chart]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/canary-app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with Podman
+        run: |
+          IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          podman build -f canary/app/Containerfile -t "$IMAGE:${GITHUB_SHA::7}" canary/app
+      - name: Push to GHCR
+        if: github.event_name == 'push'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          podman tag "$IMAGE:${GITHUB_SHA::7}" "$IMAGE:latest"
+          podman push "$IMAGE:${GITHUB_SHA::7}"
+          podman push "$IMAGE:latest"

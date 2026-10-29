@@ -1,0 +1,74 @@
+# Spins up a real cluster, ships a healthy and a broken release, and asserts
+# that the broken one is rolled back automatically.
+name: E2E canary rollback
+
+on:
+  push:
+    branches: [master]
+    paths: [canary/**, .github/workflows/e2e-canary.yml]
+  pull_request:
+    paths: [canary/**, .github/workflows/e2e-canary.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ENGINE: docker
+    defaults:
+      run:
+        working-directory: canary
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: canary
+          config: canary/kind/cluster.yaml
+
+      - name: Install Argo Rollouts and Prometheus
+        run: make addons
+
+      - name: Build, load and deploy v1
+        run: make build load deploy
+
+      - name: Healthy release is promoted
+        run: |
+          make release-good
+          # Promoted once the stable ReplicaSet is the new pod template.
+          for i in $(seq 1 96); do
+            stable=$(kubectl get rollout canary-app -o jsonpath='{.status.stableRS}')
+            current=$(kubectl get rollout canary-app -o jsonpath='{.status.currentPodHash}')
+            phase=$(kubectl get rollout canary-app -o jsonpath='{.status.phase}')
+            echo "[$((i * 5))s] phase=$phase stable=$stable current=$current"
+            [[ "$phase" == "Degraded" ]] && { echo "healthy release was rolled back" >&2; exit 1; }
+            [[ "$i" -gt 2 && "$phase" == "Healthy" && "$stable" == "$current" ]] && exit 0
+            sleep 5
+          done
+          echo "timed out waiting for promotion" >&2; exit 1
+
+      - name: Broken release is rolled back
+        run: ./scripts/demo-rollback.sh canary-app 300 | tee rollback.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## Canary e2e'
+            echo '```'
+            cat rollback.log 2>/dev/null || echo "no rollback log"
+            kubectl get rollout,analysisrun 2>/dev/null
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Debug on failure
+        if: failure()
+        run: |
+          kubectl describe rollout canary-app || true
+          kubectl get analysisrun -o yaml | tail -n 80 || true
+          kubectl get pods -A

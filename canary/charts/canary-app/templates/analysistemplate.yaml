@@ -1,0 +1,36 @@
+{{- $hash := "rollouts_pod_template_hash=\"{{args.pod-hash}}\"" -}}
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "canary-app.name" . }}-health
+  labels:
+    {{- include "canary-app.labels" . | nindent 4 }}
+spec:
+  args:
+    - name: pod-hash
+  metrics:
+    # Share of canary requests that returned 5xx.
+    - name: error-rate
+      interval: {{ .Values.analysis.interval }}
+      initialDelay: {{ .Values.analysis.initialDelay }}
+      failureLimit: {{ .Values.analysis.failureLimit }}
+      successCondition: result[0] <= {{ .Values.analysis.maxErrorRate }}
+      provider:
+        prometheus:
+          address: {{ .Values.analysis.prometheusAddress }}
+          query: |
+            (sum(rate(http_requests_total{ {{- $hash }},status=~"5.."}[1m])) or vector(0))
+            /
+            sum(rate(http_requests_total{ {{- $hash }}}[1m]))
+    # 95th percentile latency of canary requests, in seconds.
+    - name: p95-latency
+      interval: {{ .Values.analysis.interval }}
+      initialDelay: {{ .Values.analysis.initialDelay }}
+      failureLimit: {{ .Values.analysis.failureLimit }}
+      successCondition: result[0] <= {{ .Values.analysis.maxP95LatencySeconds }}
+      provider:
+        prometheus:
+          address: {{ .Values.analysis.prometheusAddress }}
+          query: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(http_request_duration_seconds_bucket{ {{- $hash }}}[1m])))

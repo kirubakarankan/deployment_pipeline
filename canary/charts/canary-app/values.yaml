@@ -1,0 +1,40 @@
+replicaCount: 5
+
+image:
+  repository: localhost/canary-app
+  tag: dev
+  pullPolicy: IfNotPresent
+
+app:
+  version: v1
+fault:
+  errorRate: "0"
+  latencyMs: "0"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+canary:
+  steps:
+    - setWeight: 20
+    - pause: { duration: 60s }
+    - setWeight: 50
+    - pause: { duration: 60s }
+    - setWeight: 80
+    - pause: { duration: 30s }
+
+analysis:
+  prometheusAddress: http://prometheus-server.monitoring.svc.cluster.local
+  interval: 15s
+  initialDelay: 30s
+  failureLimit: 1
+  maxErrorRate: "0.05"
+  maxP95LatencySeconds: "0.5"
+
+loadgen:
+  enabled: true
+  requestsPerSecond: 20
