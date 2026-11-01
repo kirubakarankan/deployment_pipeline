@@ -33,7 +33,8 @@ addons: ## Install Argo Rollouts and Prometheus
 	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
 	helm upgrade --install argo-rollouts argo/argo-rollouts \
 		--version $(ROLLOUTS_CHART_VERSION) -n argo-rollouts --create-namespace \
-		--set dashboard.enabled=true --wait
+		--set dashboard.enabled=true \
+		--set 'dashboard.extraArgs[0]=--namespace=default' --wait
 	helm upgrade --install prometheus prometheus-community/prometheus \
 		--version $(PROMETHEUS_CHART_VERSION) -n monitoring --create-namespace \
 		-f kind/prometheus-values.yaml --wait
