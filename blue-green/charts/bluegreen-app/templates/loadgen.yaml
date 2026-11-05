@@ -1,0 +1,39 @@
+{{- /*
+  One generator per Service: "active" stands in for users, "preview" gives the
+  pre-promotion analysis something to measure on the new pods.
+*/ -}}
+{{- if .Values.loadgen.enabled }}
+{{- range $target, $rps := dict "active" .Values.loadgen.requestsPerSecond "preview" .Values.loadgen.previewRequestsPerSecond }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bluegreen-app.name" $ }}-loadgen-{{ $target }}
+  labels:
+    {{- include "bluegreen-app.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "bluegreen-app.name" $ }}-loadgen-{{ $target }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "bluegreen-app.name" $ }}-loadgen-{{ $target }}
+    spec:
+      containers:
+        - name: loadgen
+          image: curlimages/curl:8.11.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              delay=$(awk "BEGIN { print 1 / {{ $rps }} }")
+              while true; do
+                curl -s -o /dev/null --max-time 2 http://{{ include "bluegreen-app.name" $ }}-{{ $target }}/ &
+                sleep "$delay"
+              done
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+{{- end }}
+{{- end }}

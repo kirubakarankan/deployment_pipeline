@@ -1,0 +1,6 @@
+apiVersion: v2
+name: bluegreen-app
+description: Demo service deployed with an Argo Rollouts blue-green strategy and Prometheus-gated promotion
+type: application
+version: 0.1.0
+appVersion: "v1"

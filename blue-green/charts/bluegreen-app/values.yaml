@@ -1,0 +1,42 @@
+replicaCount: 4
+
+image:
+  repository: localhost/bluegreen-app
+  tag: dev
+  pullPolicy: IfNotPresent
+
+app:
+  version: v1
+fault:
+  errorRate: "0"
+  latencyMs: "0"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+blueGreen:
+  # The preview stack only has to survive the load generator, not real traffic.
+  previewReplicaCount: 2
+  # How long the old ReplicaSet stays up after the switch, so a rollback is
+  # just a selector flip instead of a cold start.
+  scaleDownDelaySeconds: 60
+
+analysis:
+  prometheusAddress: http://prometheus-server.monitoring.svc.cluster.local
+  interval: 15s
+  initialDelay: 30s
+  # Pre/post promotion runs must finish, so they take a fixed number of samples.
+  count: 4
+  failureLimit: 1
+  maxErrorRate: "0.05"
+  maxP95LatencySeconds: "0.5"
+
+loadgen:
+  enabled: true
+  requestsPerSecond: 20
+  # Nothing but the load generator hits the preview Service.
+  previewRequestsPerSecond: 10
