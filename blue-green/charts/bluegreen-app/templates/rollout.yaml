@@ -33,6 +33,8 @@ spec:
               value: {{ .Values.fault.errorRate | quote }}
             - name: FAULT_LATENCY_MS
               value: {{ .Values.fault.latencyMs | quote }}
+            - name: FAULT_AFTER_SECONDS
+              value: {{ .Values.fault.afterSeconds | default 0 | quote }}
           readinessProbe:
             httpGet: { path: /readyz, port: http }
             periodSeconds: 5
@@ -51,10 +53,16 @@ spec:
       previewService: {{ include "bluegreen-app.name" . }}-preview
       previewReplicaCount: {{ .Values.blueGreen.previewReplicaCount }}
       scaleDownDelaySeconds: {{ .Values.blueGreen.scaleDownDelaySeconds }}
-      # Switch traffic by itself, but only once the analysis below has passed.
       autoPromotionEnabled: true
-      # Runs against the preview pods before any user traffic moves.
       prePromotionAnalysis:
+        templates:
+          - templateName: {{ include "bluegreen-app.name" . }}-health
+        args:
+          - name: pod-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+      # A failure here flips the active Service back to the old ReplicaSet.
+      postPromotionAnalysis:
         templates:
           - templateName: {{ include "bluegreen-app.name" . }}-health
         args:

@@ -5,7 +5,7 @@ IMAGE_REPO ?= localhost/bluegreen-app
 IMAGE_TAG  ?= dev
 IMAGE      := $(IMAGE_REPO):$(IMAGE_TAG)
 CHART     := charts/bluegreen-app
-# Same app as the canary demo, no point keeping a second copy of it.
+# Same app as the canary demo.
 APP_DIR   := ../canary/app
 # Argo Rollouts edits the active/preview Service selectors; Helm 4 server-side
 # apply would fight it over those fields, so use client-side apply.
@@ -60,7 +60,7 @@ deploy: ## Deploy v1 (first install goes straight to active)
 
 release-good: ## Ship a healthy v2 - should be promoted
 	helm upgrade $(RELEASE) $(CHART) $(HELM_FLAGS) --reuse-values \
-		--set app.version=v2 --set fault.errorRate=0 --set fault.latencyMs=0
+		--set app.version=v2 --set fault.errorRate=0 --set fault.latencyMs=0 --set fault.afterSeconds=0
 
 release-bad: ## Ship a broken v3 (30% errors) - should never go live
 	helm upgrade $(RELEASE) $(CHART) $(HELM_FLAGS) --reuse-values \
@@ -70,7 +70,7 @@ release-slow: ## Ship a slow v4 (800ms latency) - should never go live
 	helm upgrade $(RELEASE) $(CHART) $(HELM_FLAGS) --reuse-values \
 		--set app.version=v4-slow --set fault.latencyMs=800
 
-demo: ## Ship a bad release and time how fast it is blocked (SCENARIO=error|latency)
+demo: ## Ship a bad release and time how fast it is blocked (SCENARIO=error|latency|post)
 	./scripts/demo-rollback.sh $(RELEASE) 300 $(SCENARIO)
 
 status: ## Show rollout status

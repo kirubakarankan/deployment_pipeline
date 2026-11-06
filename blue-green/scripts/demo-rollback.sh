@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Ships a deliberately broken release and measures how long it takes the
-# pre-promotion analysis to catch it. The bad version must never reach the
-# active Service, so users keep getting the old one the whole time.
+# Ships a deliberately broken release and measures how long Argo Rollouts
+# takes to stop it. "post" breaks only after the switch, so the active
+# Service has to flip back.
 #
-# Usage: scripts/demo-rollback.sh [release] [timeout-seconds] [error|latency]
+# Usage: scripts/demo-rollback.sh [release] [timeout-seconds] [error|latency|post]
 set -euo pipefail
 
 RELEASE="${1:-bluegreen-app}"
@@ -14,11 +14,13 @@ CHART="$(dirname "$0")/../charts/bluegreen-app"
 case "$SCENARIO" in
   error)   FAULT=(--set fault.errorRate=0.3);  DESC="30% HTTP 500s" ;;
   latency) FAULT=(--set fault.latencyMs=800);  DESC="800ms added latency" ;;
-  *) echo "Unknown scenario '$SCENARIO', use error or latency." >&2; exit 1 ;;
+  # Must outlast the pre-promotion check (~90s), so the bad pods pass it; 50%
+  # errors because the 1m rate window needs two failing samples before the end.
+  post)    FAULT=(--set fault.errorRate=0.5 --set fault.afterSeconds=110); DESC="50% HTTP 500s starting 110s after boot" ;;
+  *) echo "Unknown scenario '$SCENARIO', use error, latency or post." >&2; exit 1 ;;
 esac
 
 phase() { kubectl get rollout "$RELEASE" -o jsonpath='{.status.phase}'; }
-# What the active Service really selects, which is what users hit.
 active_hash() { kubectl get svc "$RELEASE-active" -o jsonpath='{.spec.selector.rollouts-pod-template-hash}'; }
 
 if [[ "$(phase)" != "Healthy" ]]; then
@@ -34,13 +36,28 @@ start=$(date +%s)
 helm upgrade "$RELEASE" "$CHART" --server-side=false --reuse-values \
   --set app.version="bad-$start" "${FAULT[@]}" >/dev/null
 
+promoted_at=""
 while true; do
-  elapsed=$(( $(date +%s) - start ))
+  now=$(date +%s)
+  elapsed=$(( now - start ))
   p=$(phase)
   aborted=$(kubectl get rollout "$RELEASE" -o jsonpath='{.status.abort}')
+  active_now=$(active_hash)
   printf '\r[%3ss] phase=%-12s' "$elapsed" "$p"
 
-  if [[ "$aborted" == "true" ]]; then
+  if [[ "$SCENARIO" == "post" ]]; then
+    if [[ -z "$promoted_at" && "$active_now" != "$active_before" ]]; then
+      promoted_at=$now
+    elif [[ -n "$promoted_at" && "$active_now" == "$active_before" ]]; then
+      echo
+      echo "Promoted after $(( promoted_at - start ))s, rolled back $(( now - promoted_at ))s later"
+      echo "Active ReplicaSet back on: $active_now"
+      kubectl get analysisrun --sort-by=.metadata.creationTimestamp | tail -n 1
+      exit 0
+    elif [[ -z "$promoted_at" && "$aborted" == "true" ]]; then
+      echo; echo "FAIL: stopped before promotion, the fault started too early" >&2; exit 1
+    fi
+  elif [[ "$aborted" == "true" ]]; then
     echo
     active_after=$(active_hash)
     echo "Release blocked after ${elapsed}s"
@@ -50,11 +67,11 @@ while true; do
     exit $?
   fi
 
-  if [[ "$(active_hash)" != "$active_before" ]]; then
+  if [[ "$SCENARIO" != "post" && "$active_now" != "$active_before" ]]; then
     echo; echo "FAIL: broken release was promoted" >&2; exit 1
   fi
   if (( elapsed > TIMEOUT )); then
-    echo; echo "FAIL: not blocked within ${TIMEOUT}s" >&2; exit 1
+    echo; echo "FAIL: not stopped within ${TIMEOUT}s" >&2; exit 1
   fi
   sleep 2
 done

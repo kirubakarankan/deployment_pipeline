@@ -1,7 +1,4 @@
-{{- /*
-  One generator per Service: "active" stands in for users, "preview" gives the
-  pre-promotion analysis something to measure on the new pods.
-*/ -}}
+{{- /* the preview generator gives the pre-promotion analysis traffic to measure */ -}}
 {{- if .Values.loadgen.enabled }}
 {{- range $target, $rps := dict "active" .Values.loadgen.requestsPerSecond "preview" .Values.loadgen.previewRequestsPerSecond }}
 ---
