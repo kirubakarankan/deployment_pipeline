@@ -3,12 +3,19 @@
 # pre-promotion analysis to catch it. The bad version must never reach the
 # active Service, so users keep getting the old one the whole time.
 #
-# Usage: scripts/demo-rollback.sh [release] [timeout-seconds]
+# Usage: scripts/demo-rollback.sh [release] [timeout-seconds] [error|latency]
 set -euo pipefail
 
 RELEASE="${1:-bluegreen-app}"
 TIMEOUT="${2:-300}"
+SCENARIO="${3:-error}"
 CHART="$(dirname "$0")/../charts/bluegreen-app"
+
+case "$SCENARIO" in
+  error)   FAULT=(--set fault.errorRate=0.3);  DESC="30% HTTP 500s" ;;
+  latency) FAULT=(--set fault.latencyMs=800);  DESC="800ms added latency" ;;
+  *) echo "Unknown scenario '$SCENARIO', use error or latency." >&2; exit 1 ;;
+esac
 
 phase() { kubectl get rollout "$RELEASE" -o jsonpath='{.status.phase}'; }
 # What the active Service really selects, which is what users hit.
@@ -21,11 +28,11 @@ fi
 
 active_before=$(active_hash)
 echo "Active ReplicaSet hash: $active_before"
-echo "Shipping broken release (30% HTTP 500s)..."
+echo "Shipping broken release ($DESC)..."
 
 start=$(date +%s)
 helm upgrade "$RELEASE" "$CHART" --server-side=false --reuse-values \
-  --set app.version="bad-$start" --set fault.errorRate=0.3 >/dev/null
+  --set app.version="bad-$start" "${FAULT[@]}" >/dev/null
 
 while true; do
   elapsed=$(( $(date +%s) - start ))

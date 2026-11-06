@@ -20,7 +20,9 @@ endif
 ROLLOUTS_CHART_VERSION   := 2.37.7
 PROMETHEUS_CHART_VERSION := 25.27.0
 
-.PHONY: help up cluster addons build load deploy release-good release-bad demo status dashboard lint down
+SCENARIO ?= error
+
+.PHONY: help up cluster addons build load deploy release-good release-bad release-slow demo status dashboard lint down
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -64,8 +66,12 @@ release-bad: ## Ship a broken v3 (30% errors) - should never go live
 	helm upgrade $(RELEASE) $(CHART) $(HELM_FLAGS) --reuse-values \
 		--set app.version=v3-bad --set fault.errorRate=0.3
 
-demo: ## Ship a bad release and time how fast it is blocked
-	./scripts/demo-rollback.sh $(RELEASE)
+release-slow: ## Ship a slow v4 (800ms latency) - should never go live
+	helm upgrade $(RELEASE) $(CHART) $(HELM_FLAGS) --reuse-values \
+		--set app.version=v4-slow --set fault.latencyMs=800
+
+demo: ## Ship a bad release and time how fast it is blocked (SCENARIO=error|latency)
+	./scripts/demo-rollback.sh $(RELEASE) 300 $(SCENARIO)
 
 status: ## Show rollout status
 	kubectl get rollout $(RELEASE) -o wide
