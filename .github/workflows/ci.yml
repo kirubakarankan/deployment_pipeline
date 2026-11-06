@@ -35,6 +35,15 @@ jobs:
       - run: helm lint canary/charts/canary-app
       - run: helm template canary-app canary/charts/canary-app > /dev/null
 
+  bluegreen-chart:
+    name: Blue-green Helm chart
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint blue-green/charts/bluegreen-app
+      - run: helm template bluegreen-app blue-green/charts/bluegreen-app > /dev/null
+
   terraform:
     name: Terraform
     runs-on: ubuntu-24.04

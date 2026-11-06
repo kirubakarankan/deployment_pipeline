@@ -1,0 +1,81 @@
+# Spins up a real cluster, ships a healthy release and three broken ones, and
+# asserts that each broken one is stopped automatically.
+name: E2E blue-green rollback
+
+on:
+  push:
+    branches: [master]
+    paths: [blue-green/**, canary/app/**, .github/workflows/e2e-blue-green.yml]
+  pull_request:
+    paths: [blue-green/**, canary/app/**, .github/workflows/e2e-blue-green.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      ENGINE: docker
+    defaults:
+      run:
+        working-directory: blue-green
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: blue-green
+          config: blue-green/kind/cluster.yaml
+
+      - name: Install Argo Rollouts and Prometheus
+        run: make addons
+
+      - name: Build, load and deploy v1
+        run: make build load deploy
+
+      - name: Healthy release is promoted
+        run: |
+          make release-good
+          ./scripts/wait-promoted.sh
+
+      - name: Error spike is blocked before promotion
+        run: make demo SCENARIO=error | tee error.log
+
+      - name: Back to a healthy release
+        run: make release-good && ./scripts/wait-promoted.sh
+
+      - name: Slow release is blocked before promotion
+        run: make demo SCENARIO=latency | tee latency.log
+
+      - name: Back to a healthy release again
+        run: make release-good && ./scripts/wait-promoted.sh
+
+      - name: Late failure is rolled back after promotion
+        run: make demo SCENARIO=post | tee post.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## Blue-green e2e'
+            for s in error latency post; do
+              echo "### $s"
+              echo '```'
+              tr '\r' '\n' < "$s.log" 2>/dev/null | tail -n 6 || echo "no log"
+              echo '```'
+            done
+            echo '```'
+            kubectl get rollout,analysisrun 2>/dev/null
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Debug on failure
+        if: failure()
+        run: |
+          kubectl describe rollout bluegreen-app || true
+          kubectl get analysisrun -o yaml | tail -n 80 || true
+          kubectl get pods -A
