@@ -8,6 +8,7 @@ import main
 def client(monkeypatch):
     monkeypatch.setattr(main, "APP_VERSION", "v1")
     monkeypatch.setattr(main, "FAULT_ERROR_RATE", 0.0)
+    monkeypatch.setattr(main, "FAULT_AFTER_SECONDS", 0)
     return TestClient(main.app)
 
 
@@ -35,3 +36,11 @@ def test_fault_injection_returns_500(client, monkeypatch):
     resp = client.get("/")
     assert resp.status_code == 500
     assert resp.json()["error"] == "injected fault"
+
+
+def test_fault_waits_until_after_boot_delay(client, monkeypatch):
+    monkeypatch.setattr(main, "FAULT_ERROR_RATE", 1.0)
+    monkeypatch.setattr(main, "FAULT_AFTER_SECONDS", 3600)
+    assert client.get("/").status_code == 200
+    monkeypatch.setattr(main, "FAULT_AFTER_SECONDS", 0)
+    assert client.get("/").status_code == 500

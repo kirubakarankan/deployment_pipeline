@@ -17,6 +17,9 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_
 APP_VERSION = os.getenv("APP_VERSION", "dev")
 FAULT_ERROR_RATE = float(os.getenv("FAULT_ERROR_RATE", "0"))  # 0.0 - 1.0
 FAULT_LATENCY_MS = int(os.getenv("FAULT_LATENCY_MS", "0"))
+# Faults start this long after boot, so a release can pass its checks first.
+FAULT_AFTER_SECONDS = int(os.getenv("FAULT_AFTER_SECONDS", "0"))
+STARTED = time.monotonic()
 
 REQUESTS = Counter(
     "http_requests_total", "HTTP requests", ["method", "path", "status"]
@@ -49,10 +52,11 @@ async def record_metrics(request: Request, call_next):
 
 @app.get("/")
 async def root():
-    if FAULT_LATENCY_MS:
-        await asyncio.sleep(FAULT_LATENCY_MS / 1000)
-    if random.random() < FAULT_ERROR_RATE:
-        return JSONResponse({"error": "injected fault", "version": APP_VERSION}, status_code=500)
+    if time.monotonic() - STARTED >= FAULT_AFTER_SECONDS:
+        if FAULT_LATENCY_MS:
+            await asyncio.sleep(FAULT_LATENCY_MS / 1000)
+        if random.random() < FAULT_ERROR_RATE:
+            return JSONResponse({"error": "injected fault", "version": APP_VERSION}, status_code=500)
     return {"message": "hello", "version": APP_VERSION}
 
 
